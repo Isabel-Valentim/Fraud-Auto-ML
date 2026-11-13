@@ -127,6 +127,7 @@
     }
   ],
   "economia_dez": 42350.56,
+  "fonte_motivo": "LLM OpenAI (4,322 de 4,322)",
   "jan2026": {
     "n": 44451,
     "n_alerta": 4322,

@@ -1,10 +1,14 @@
 # Radar de Fraude
 
+**🇧🇷 Português** · [🇺🇸 English](README.en.md)
+
 **Detecção de fraude em transações com decisão por custo, fila priorizada para a área de negócio e explicação de cada alerta.**
+
+**▶ Painel online (PT/EN):** https://fraud-auto-ml.streamlit.app/ · **Apresentação (PT + EN):** [entrega/apresentacao_case_fraude.pdf](entrega/apresentacao_case_fraude.pdf)
 
 Hoje a triagem de fraude é quase toda manual, e o score usado para ajudar tem AUC 0,50: equivale a um sorteio.
 Este projeto troca esse processo por um modelo que dá a cada transação uma **probabilidade de fraude**, uma **ação**
-(aprovar, revisar ou bloquear) e o **motivo** em português. Os casos chegam à área de negócio numa fila ordenada por
+(aprovar, revisar ou bloquear) e o **motivo**, escrito por um LLM em português e inglês. Os casos chegam à área de negócio numa fila ordenada por
 **perda esperada (risco × valor)**, e cada análise registrada vira rótulo para a próxima versão do modelo.
 
 | | |
@@ -31,7 +35,7 @@ flowchart LR
     D --> E[LightGBM extra_trees<br/>campeão leve e explicável]
     E --> F[Limiares por custo<br/>R$ 4 análise · R$ 15 bloqueio indevido]
     F --> G[Aprovar · Revisar · Bloquear]
-    G --> H[SHAP<br/>motivo de cada alerta]
+    G --> H[SHAP + LLM OpenAI<br/>motivo de cada alerta em PT e EN]
     H --> I[Fila priorizada<br/>risco × valor]
     I --> J[Tratativa da área de negócio<br/>fraude · não é fraude · inconclusivo]
     J -->|rótulos novos| K[Re-treino mensal<br/>+ recalibração]
@@ -69,7 +73,15 @@ e registra a **tratativa**. Essas conclusões são o plano de calibração das p
 - Casos "não é fraude" com risco alto mostram onde o modelo erra e entram no treino.
 - Uma versão nova só entra depois de um mês em *shadow mode*, comparada com a anterior.
 
-![Painel da área de negócio](artefatos/figs/painel_fila.png)
+### Painel online · https://fraud-auto-ml.streamlit.app/
+
+O painel tem um botão **Português / English** que troca toda a interface, inclusive o motivo de cada alerta.
+
+| Visão jan/2026 | Fila priorizada |
+|---|---|
+| ![Visão](artefatos/figs/painel_visao.png) | ![Fila priorizada](artefatos/figs/painel_fila.png) |
+| **Simulador** | **Drift** |
+| ![Simulador](artefatos/figs/painel_simulador.png) | ![Drift](artefatos/figs/painel_drift.png) |
 
 ## Estrutura
 
@@ -81,8 +93,10 @@ e registra a **tratativa**. Essas conclusões são o plano de calibração das p
 │   └── dados/                     # jan/26 classificado e PSI
 ├── transacoes_historico_2025.csv  # base de treino (523 mil transações, com rótulo de fraude)
 ├── transacoes_jan2026.csv         # base a classificar (44 mil transações, sem rótulo)
-├── entrega/                       # jan/26 classificado (probabilidade, ação e motivo)
-├── artefatos/                     # métricas, gráficos e resultados salvos do AutoGluon
+├── entrega/                       # jan/26 classificado (probabilidade, ação e motivo em PT e EN)
+│                                  # + apresentacao_case_fraude.pdf (PT e EN no mesmo arquivo)
+├── artefatos/                     # métricas, gráficos (PT e EN), cache do LLM e resultados do AutoGluon
+├── .env.example                   # modelo do .env com a chave da OpenAI (o .env não vai para o git)
 ├── dados_externos/                # cache da API de feriados (BrasilAPI)
 └── extras/
     └── fontes/                    # fonte dos gráficos (licença OFL)
@@ -97,9 +111,11 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-1. Execute `case_fraude.ipynb`. Com `USAR_AUTOGLUON = False` (padrão), ele lê os resultados salvos do benchmark e roda
+1. Copiloto com LLM (opcional): copie `.env.example` para `.env` e preencha `OPENAI_API_KEY` e `OPENAI_MODEL`.
+   Sem chave, o notebook usa o cache salvo (`artefatos/cache_motivos_llm.json`) ou um template com os mesmos fatos.
+2. Execute `case_fraude.ipynb` (texto em português e inglês; cada gráfico é salvo nos dois idiomas). Com `USAR_AUTOGLUON = False` (padrão), ele lê os resultados salvos do benchmark e roda
    em poucos minutos. Com `True`, re-treina os 20 modelos (~25 min).
-2. Dashboard: `streamlit run app/streamlit_app.py`
+3. Dashboard: `streamlit run app/streamlit_app.py` (ou acesse a versão online: https://fraud-auto-ml.streamlit.app/)
 
 **Reprodutibilidade:** o notebook foi re-executado do zero num ambiente limpo, com outra versão de Python e das
 bibliotecas, e as 139 métricas salvas e o CSV de entrega saíram idênticos.
@@ -113,6 +129,7 @@ bibliotecas, e as 139 métricas salvas e o CSV de entrega saíram idênticos.
 | AutoGluon como régua, LightGBM como modelo | Mesma performance do melhor modelo (diferença de 0,006 de PR-AUC), mas leve e explicável |
 | Limiares por custo em R$ | Decisão de negócio explícita e ajustável sem re-treinar |
 | Fila por risco × valor | Quem analisa olha primeiro onde está o dinheiro |
+| LLM só redige, não decide | Recebe apenas os 3 fatores do SHAP; saída estruturada e validada; resultado em cache |
 
 ## Limitações e próximos passos
 
@@ -120,6 +137,7 @@ bibliotecas, e as 139 métricas salvas e o CSV de entrega saíram idênticos.
 - As premissas de custo precisam ser validadas com a área de negócio.
 - Próximos sinais a incorporar: geolocalização da compra × endereço do cliente, velocidade entre cidades
   (*impossible travel*) e *device fingerprint*.
-- Copiloto com LLM: reescrever o motivo de cada alerta em linguagem natural, usando só os fatores do SHAP.
 
-**Stack:** Python · pandas · LightGBM · AutoGluon · SHAP · Streamlit · Altair · Matplotlib · BrasilAPI
+**Autora:** Isabel Valentim
+
+**Stack:** Python · pandas · LightGBM · AutoGluon · SHAP · OpenAI API · Streamlit · Altair · Matplotlib · BrasilAPI

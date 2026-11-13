@@ -1,4 +1,4 @@
-"""Dashboard do case de fraude: visão de jan/2026, fila do analista, simulador e drift."""
+"""Dashboard do case de fraude (PT/EN): visão de jan/2026, fila priorizada com tratativa, simulador e drift."""
 import json
 from pathlib import Path
 
@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Radar de Fraude", page_icon=":material/shield:", layout="wide")
+st.set_page_config(page_title="Radar de Fraude · Fraud Radar", page_icon=":material/shield:", layout="wide")
 
 BASE = Path(__file__).parent
 # paleta validada (daltonismo + contraste): azul = padrão/revisar, magenta = risco/bloquear, violeta = 3ª série
@@ -19,9 +19,49 @@ GRAD_CAPA = "linear-gradient(120deg, #08137a 0%, #1b1a8f 25%, #521a8c 58%, #a10a
 ACOES = {"bloquear": MAGENTA, "revisar": AZUL, "aprovar": CINZA}
 FONTE = "IBM Plex Sans, Segoe UI, sans-serif"
 
+# ---------------------------------------------------------------------------- idioma
+if "lang" not in st.session_state:
+    st.session_state.lang = "PT"
+
+
+def EN():
+    return st.session_state.get("lang") == "EN"
+
+
+def T(pt, en):
+    """Texto no idioma escolhido no botão PT/EN."""
+    return en if EN() else pt
+
+
+ACAO_EN = {"bloquear": "block", "revisar": "review", "aprovar": "approve"}
+RESULTADOS = ["Fraude confirmada", "Não é fraude", "Inconclusivo"]  # valores gravados (sempre em PT)
+RES_EN = {"Fraude confirmada": "Confirmed fraud", "Não é fraude": "Not fraud", "Inconclusivo": "Inconclusive", "Pendente": "Pending"}
+FAIXA_EN = {"estável": "stable", "atenção": "attention", "mudança": "shift"}
+REG_EN = {"Sudeste": "Southeast", "Sul": "South", "Nordeste": "Northeast"}
+
+
+def acao_txt(a):
+    return ACAO_EN.get(a, a) if EN() else a
+
+
+def res_txt(r):
+    return RES_EN.get(r, r) if EN() else r
+
+
+def nomes():
+    return {"hora": T("Horário", "Hour"), "is_new_device": T("Dispositivo novo", "New device"),
+            "nome_estabelecimento": T("Estabelecimento", "Merchant"), "cidade": T("Cidade", "City"),
+            "turno": T("Turno", "Shift"), "cidade_regiao": T("Região", "Region"), "valor_transacao": T("Valor", "Amount"),
+            "device_type": T("Tipo de dispositivo", "Device type"), "valor_log": T("Valor (log)", "Amount (log)")}
+
+
 st.html(f"""<style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
-.hero {{ background: {GRAD_CAPA}; color: #fff; border-radius: 6px; padding: 34px 40px 30px; margin-bottom: 6px }}
+.hero {{ background: {GRAD_CAPA}; color: #fff; padding: 34px 40px 30px; margin-bottom: 6px; position: relative; overflow: hidden;
+         border-radius: 18px; box-shadow: 0 18px 40px rgba(20,24,80,.22) }}
+.hero::after {{ content: ''; position: absolute; width: 520px; height: 520px; right: -140px; top: -200px; border-radius: 50%;
+               background: radial-gradient(circle at 35% 35%, rgba(255,255,255,.22), rgba(255,255,255,0) 60%);
+               border: 1px solid rgba(255,255,255,.18) }}
 .hero .k {{ font-size: 12px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; color: #ffb3d1 }}
 .hero h1 {{ font-family: {FONTE}; font-weight: 300; font-size: 44px; line-height: 1.1; margin: 8px 0 0; color: #fff; padding: 0 }}
 .hero .r {{ height: 2px; width: 40%; background: rgba(255,255,255,.85); margin: 20px 0 16px -40px }}
@@ -49,10 +89,6 @@ st.html(f"""<style>
 .mini {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 6px 0 2px }}
 .mini div {{ background: #f6f7fb; border-radius: 12px; padding: 10px 14px; border-left: 3px solid {VIOLETA} }}
 .mini span {{ display: block; font-size: 12px; color: {TINTA2} }} .mini b {{ font-size: 22px; font-weight: 500; color: {TINTA} }}
-.hero {{ position: relative; overflow: hidden; border-radius: 18px; box-shadow: 0 18px 40px rgba(20,24,80,.22) }}
-.hero::after {{ content: ''; position: absolute; width: 520px; height: 520px; right: -140px; top: -200px; border-radius: 50%;
-               background: radial-gradient(circle at 35% 35%, rgba(255,255,255,.22), rgba(255,255,255,0) 60%);
-               border: 1px solid rgba(255,255,255,.18) }}
 [data-testid="stVerticalBlockBorderWrapper"]:has(> div > [data-testid="stVerticalBlock"]) {{
   background: #fff; border-radius: 16px !important; border-color: #eceef4 !important; box-shadow: 0 6px 24px rgba(17,22,58,.06) }}
 [data-testid="stMetric"] {{ background: #fff; border-radius: 14px !important; box-shadow: 0 6px 24px rgba(17,22,58,.06);
@@ -65,6 +101,8 @@ st.html(f"""<style>
 @st.cache_data
 def carregar_dados():
     df = pd.read_csv(BASE / "dados" / "jan2026_classificadas.csv", parse_dates=["datahora_transacao"])
+    if "motivo_alerta_en" not in df:
+        df["motivo_alerta_en"] = df.motivo_alerta
     drift = pd.read_csv(BASE / "dados" / "drift.csv")
     meta = json.loads((BASE / "meta.json").read_text(encoding="utf-8"))
     return df, drift, meta
@@ -82,21 +120,20 @@ T_REV, T_BLOQ = meta["t_rev"], meta["t_bloq"]
 REGIAO = {"Belo Horizonte": "Sudeste", "Rio de Janeiro": "Sudeste", "São Paulo": "Sudeste", "Curitiba": "Sul",
           "Porto Alegre": "Sul", "Recife": "Nordeste", "Salvador": "Nordeste"}
 DERIVADAS = {"valor_transacao", "valor_log", "hora", "is_new_device", "turno", "cidade_regiao"}
-NOMES = {"hora": "Horário", "is_new_device": "Dispositivo novo", "nome_estabelecimento": "Estabelecimento",
-         "cidade": "Cidade", "turno": "Turno", "cidade_regiao": "Região", "valor_transacao": "Valor",
-         "device_type": "Tipo de dispositivo", "valor_log": "Valor (log)"}
 
 
-def n_br(v):
-    return f"{v:,.0f}".replace(",", ".")
+def n_br(v, d=0):
+    s = f"{v:,.{d}f}"
+    return s if EN() else s.replace(",", "X").replace(".", ",").replace("X", ".")
 
 
 def brl2(v):
-    return "R$ " + f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return "R$ " + n_br(v, 2)
 
 
 def pct_br(v, d=1):
-    return f"{v:.{d}%}".replace(".", ",")
+    s = f"{v:.{d}%}"
+    return s if EN() else s.replace(".", ",")
 
 
 def turno_da_hora(h):
@@ -133,75 +170,86 @@ def titulo_card(t, sub=""):
 
 # ---------------------------------------------------------------------------
 def pagina_visao():
-    alerta = df[df.acao_recomendada != "aprovar"]
+    alerta = df[df.acao_recomendada != "aprovar"].assign(acao=lambda d: d.acao_recomendada.map(acao_txt))
     n_rev, n_bloq = (df.acao_recomendada == "revisar").sum(), (df.acao_recomendada == "bloquear").sum()
     m = meta["metricas_teste"]
-    nums = [(n_br(len(df)), "transações em jan/2026"), (n_br(n_rev), f"para revisar · {pct_br(n_rev / len(df))}"),
-            (n_br(n_bloq), "bloqueio automático"),
-            ("R$ " + n_br((df.prob_fraude * df.valor_transacao).sum()), "fraude esperada"),
-            (f"{m['pr_auc']:.2f}".replace(".", ","), f"PR-AUC · score atual {m['auc_score_interno']:.2f} AUC".replace(".", ","))]
-    st.html(f"""<div class="hero"><div class="k">Radar de Fraude · Janeiro/2026</div>
-      <h1>Quais transações merecem atenção agora</h1><div class="r"></div>
-      <p>Modelo LightGBM treinado em 2025 · revisar se a probabilidade for ≥ {T_REV:.0%} · bloquear se for ≥ {T_BLOQ:.0%}</p>
+    nums = [(n_br(len(df)), T("transações em jan/2026", "transactions in Jan/2026")),
+            (n_br(n_rev), T("para revisar · ", "to review · ") + pct_br(n_rev / len(df))),
+            (n_br(n_bloq), T("bloqueio automático", "automatic block")),
+            ("R$ " + n_br((df.prob_fraude * df.valor_transacao).sum()), T("fraude esperada", "expected fraud")),
+            (n_br(m["pr_auc"], 2), T("PR-AUC · score atual ", "PR-AUC · current score ") + n_br(m["auc_score_interno"], 2) + " AUC")]
+    st.html(f"""<div class="hero"><div class="k">{T("Radar de Fraude · Janeiro/2026", "Fraud Radar · January/2026")}</div>
+      <h1>{T("Quais transações merecem atenção agora", "Which transactions need attention now")}</h1><div class="r"></div>
+      <p>{T(f"Modelo LightGBM treinado em 2025 · revisar se a probabilidade for ≥ {T_REV:.0%} · bloquear se for ≥ {T_BLOQ:.0%}",
+            f"LightGBM model trained on 2025 · review if probability ≥ {T_REV:.0%} · block if ≥ {T_BLOQ:.0%}")}</p>
       <div class="nums">{''.join(f'<div><b>{v}</b><span>{r}</span></div>' for v, r in nums)}</div></div>""")
 
     c1, c2 = st.columns([1.35, 1])
     with c1, st.container(border=True):
-        titulo_card("Alertas por hora do dia", "a fraude se concentra à noite: o pico é às 22h–23h")
-        por_hora = alerta.groupby(["hora", "acao_recomendada"]).size().reset_index(name="n")
+        titulo_card(T("Alertas por hora do dia", "Alerts by hour of day"),
+                    T("a fraude se concentra à noite: o pico é às 22h–23h", "fraud concentrates at night: the peak is at 10–11 pm"))
+        por_hora = alerta.groupby(["hora", "acao"]).size().reset_index(name="n")
         grafico(alt.Chart(por_hora).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3, stroke="white", strokeWidth=1).encode(
             x=alt.X("hora:O", title=None, axis=alt.Axis(labelExpr="datum.value + 'h'", labelAngle=0)),
-            y=alt.Y("n:Q", title="transações"),
-            color=alt.Color("acao_recomendada:N", title=None,
-                            scale=alt.Scale(domain=["revisar", "bloquear"], range=[AZUL, MAGENTA])),
-            order=alt.Order("acao_recomendada:N", sort="descending"),
-            tooltip=[alt.Tooltip("hora:O", title="hora"), alt.Tooltip("acao_recomendada:N", title="ação"),
-                     alt.Tooltip("n:Q", title="transações", format=",")]), 270)
+            y=alt.Y("n:Q", title=T("transações", "transactions")),
+            color=alt.Color("acao:N", title=None,
+                            scale=alt.Scale(domain=[acao_txt("revisar"), acao_txt("bloquear")], range=[AZUL, MAGENTA])),
+            order=alt.Order("acao:N", sort="descending"),
+            tooltip=[alt.Tooltip("hora:O", title=T("hora", "hour")), alt.Tooltip("acao:N", title=T("ação", "action")),
+                     alt.Tooltip("n:Q", title=T("transações", "transactions"), format=",")]), 270)
     with c2, st.container(border=True):
-        titulo_card("Alertas por estabelecimento", "volume de transações sinalizadas")
+        titulo_card(T("Alertas por estabelecimento", "Alerts by merchant"),
+                    T("volume de transações sinalizadas", "number of flagged transactions"))
         por_estab = alerta.groupby("nome_estabelecimento").size().reset_index(name="n")
         base = alt.Chart(por_estab).encode(y=alt.Y("nome_estabelecimento:N", sort="-x", title=None))
         grafico(base.mark_bar(cornerRadiusTopRight=3, cornerRadiusBottomRight=3, height=16).encode(
             x=alt.X("n:Q", title=None, axis=alt.Axis(labels=False, grid=False)),
             color=alt.Color("n:Q", scale=alt.Scale(range=["#b9c0f2", AZUL]), legend=None),
-            tooltip=[alt.Tooltip("nome_estabelecimento:N", title="estabelecimento"), alt.Tooltip("n:Q", title="alertas")])
+            tooltip=[alt.Tooltip("nome_estabelecimento:N", title=T("estabelecimento", "merchant")),
+                     alt.Tooltip("n:Q", title=T("alertas", "alerts"))])
             + base.mark_text(align="left", dx=5, color=TINTA2, fontSize=11).encode(x="n:Q", text=alt.Text("n:Q", format=",")),
             270)
 
     with st.container(border=True):
-        titulo_card("Onde e quando: taxa de alerta por estabelecimento × hora",
-                    "cada estabelecimento tem a sua janela de risco · quanto mais escuro, maior a % de transações em alerta")
+        titulo_card(T("Onde e quando: taxa de alerta por estabelecimento × hora", "Where and when: alert rate by merchant × hour"),
+                    T("cada estabelecimento tem a sua janela de risco · quanto mais escuro, maior a % de transações em alerta",
+                      "each merchant has its own risk window · the darker, the higher the % of transactions flagged"))
         mapa = (df.assign(alerta=df.acao_recomendada != "aprovar")
                 .groupby(["nome_estabelecimento", "hora"]).alerta.mean().reset_index())
         ordem = mapa.groupby("nome_estabelecimento").alerta.mean().sort_values(ascending=False).index.tolist()
         grafico(alt.Chart(mapa).mark_rect(cornerRadius=2, stroke="white", strokeWidth=2).encode(
             x=alt.X("hora:O", title=None, axis=alt.Axis(labelExpr="datum.value + 'h'", labelAngle=0, domain=False)),
             y=alt.Y("nome_estabelecimento:N", sort=ordem, title=None, axis=alt.Axis(domain=False)),
-            color=alt.Color("alerta:Q", title="% em alerta", scale=alt.Scale(range=["#f3f4f8", "#f9d3e2", "#ef6a9c", MAGENTA, "#7a0034"]),
+            color=alt.Color("alerta:Q", title=T("% em alerta", "% flagged"),
+                            scale=alt.Scale(range=["#f3f4f8", "#f9d3e2", "#ef6a9c", MAGENTA, "#7a0034"]),
                             legend=alt.Legend(format="%", orient="right", direction="vertical", gradientLength=180)),
-            tooltip=[alt.Tooltip("nome_estabelecimento:N", title="estabelecimento"), alt.Tooltip("hora:O", title="hora"),
-                     alt.Tooltip("alerta:Q", title="% em alerta", format=".1%")]), 330)
+            tooltip=[alt.Tooltip("nome_estabelecimento:N", title=T("estabelecimento", "merchant")),
+                     alt.Tooltip("hora:O", title=T("hora", "hour")),
+                     alt.Tooltip("alerta:Q", title=T("% em alerta", "% flagged"), format=".1%")]), 330)
 
     c3, c4 = st.columns([1.35, 1])
     with c3, st.container(border=True):
-        titulo_card("Alertas por dia", "volume diário de transações sinalizadas em janeiro")
+        titulo_card(T("Alertas por dia", "Alerts by day"),
+                    T("volume diário de transações sinalizadas em janeiro", "daily flagged transactions in January"))
         por_dia = alerta.groupby(alerta.datahora_transacao.dt.date).size().reset_index(name="n")
         por_dia.columns = ["dia", "n"]
-        base = alt.Chart(por_dia).encode(x=alt.X("dia:T", title=None, axis=alt.Axis(format="%d/%m", grid=False)))
+        base = alt.Chart(por_dia).encode(x=alt.X("dia:T", title=None, axis=alt.Axis(format=T("%d/%m", "%b %d"), grid=False)))
         grafico(base.mark_area(line={"color": AZUL, "strokeWidth": 2}, interpolate="monotone", color=alt.Gradient(
             gradient="linear", x1=1, x2=1, y1=1, y2=0,
             stops=[alt.GradientStop(color="rgba(51,70,211,0.02)", offset=0), alt.GradientStop(color="rgba(51,70,211,0.25)", offset=1)]))
-            .encode(y=alt.Y("n:Q", title="alertas"))
+            .encode(y=alt.Y("n:Q", title=T("alertas", "alerts")))
             + base.mark_point(filled=True, size=40, color=AZUL, opacity=0).encode(
-                y="n:Q", tooltip=[alt.Tooltip("dia:T", title="dia", format="%d/%m"), alt.Tooltip("n:Q", title="alertas")]),
+                y="n:Q", tooltip=[alt.Tooltip("dia:T", title=T("dia", "day"), format=T("%d/%m", "%b %d")),
+                                  alt.Tooltip("n:Q", title=T("alertas", "alerts"))]),
             240)
     with c4, st.container(border=True):
-        titulo_card("Taxa de alerta por cidade", "% das transações da cidade que foram sinalizadas")
+        titulo_card(T("Taxa de alerta por cidade", "Alert rate by city"),
+                    T("% das transações da cidade que foram sinalizadas", "% of the city's transactions that were flagged"))
         por_cid = (df.acao_recomendada != "aprovar").groupby(df.cidade).mean().reset_index(name="taxa")
         base = alt.Chart(por_cid).encode(y=alt.Y("cidade:N", sort="-x", title=None))
         grafico(base.mark_bar(color=VIOLETA, cornerRadiusTopRight=3, cornerRadiusBottomRight=3, height=16).encode(
             x=alt.X("taxa:Q", title=None, axis=alt.Axis(labels=False, grid=False)),
-            tooltip=["cidade", alt.Tooltip("taxa:Q", format=".1%", title="% em alerta")])
+            tooltip=["cidade", alt.Tooltip("taxa:Q", format=".1%", title=T("% em alerta", "% flagged"))])
             + base.mark_text(align="left", dx=5, color=TINTA2, fontSize=11).encode(
                 x="taxa:Q", text=alt.Text("taxa:Q", format=".1%")), 240)
 
@@ -209,7 +257,6 @@ def pagina_visao():
 # ---------------------------------------------------------------------------
 ARQ_TRATATIVAS = BASE / "dados" / "tratativas.csv"
 COLS_TRAT = ["id", "resultado", "analista", "observacao", "registrado_em"]
-RESULTADOS = ["Fraude confirmada", "Não é fraude", "Inconclusivo"]
 
 
 def ler_tratativas():
@@ -235,14 +282,16 @@ def fatores_shap(linha):
     for f in feats:
         X[f] = pd.Categorical(X[f], categories=cats[f]) if f in cats else X[f].astype(float)
     c = modelo.predict(X, pred_contrib=True)[0][:-1]
-    return pd.DataFrame({"variavel": [NOMES.get(f, f) for f in feats], "contrib": c})
+    return pd.DataFrame({"variavel": [nomes().get(f, f) for f in feats], "contrib": c})
 
 
 def pagina_fila():
-    cabecalho("Área de negócio", "Fila priorizada de análise",
-              "Os casos estão em ordem de <b>perda esperada = risco de fraude × valor da transação</b>. Assim, um valor alto "
-              "com risco médio sobe para o topo, à frente de um valor baixo com risco alto. Selecione um caso para ver "
-              "por que ele foi sinalizado e registrar a conclusão da análise.")
+    cabecalho(T("Área de negócio", "Business team"), T("Fila priorizada de análise", "Prioritized review queue"),
+              T("Os casos estão em ordem de <b>perda esperada = risco de fraude × valor da transação</b>. Assim, um valor alto "
+                "com risco médio sobe para o topo, à frente de um valor baixo com risco alto. Selecione um caso para ver "
+                "por que ele foi sinalizado e registrar a conclusão da análise.",
+                "Cases are sorted by <b>expected loss = fraud risk × transaction amount</b>, so a high amount with medium risk "
+                "rises above a low amount with high risk. Select a case to see why it was flagged and record the outcome."))
     trat = ler_tratativas()
     fila = df[df.acao_recomendada != "aprovar"].copy()
     fila["id"] = fila.index
@@ -255,108 +304,128 @@ def pagina_fila():
     tratados = fila[fila.resultado != "Pendente"]
     conclusivos = tratados[tratados.resultado != "Inconclusivo"]
     with st.container(horizontal=True):
-        st.metric("Casos na fila", n_br(len(fila)), border=True)
-        st.metric("Perda esperada total", "R$ " + n_br(fila.perda_esperada.sum()), border=True)
-        st.metric("Já analisados", n_br(len(tratados)), help=f"{pct_br(len(tratados) / max(len(fila), 1))} da fila",
-                  border=True)
-        st.metric("Fraude confirmada", pct_br((conclusivos.resultado == "Fraude confirmada").mean()) if len(conclusivos) else "–",
-                  help="Precisão da fila: % dos casos analisados (excluindo inconclusivos) que eram fraude. "
-                       "É o principal indicador para calibrar a próxima versão do modelo.", border=True)
+        st.metric(T("Casos na fila", "Cases in queue"), n_br(len(fila)), border=True)
+        st.metric(T("Perda esperada total", "Total expected loss"), "R$ " + n_br(fila.perda_esperada.sum()), border=True)
+        st.metric(T("Já analisados", "Already reviewed"), n_br(len(tratados)),
+                  help=pct_br(len(tratados) / max(len(fila), 1)) + T(" da fila", " of the queue"), border=True)
+        st.metric(T("Fraude confirmada", "Confirmed fraud"),
+                  pct_br((conclusivos.resultado == "Fraude confirmada").mean()) if len(conclusivos) else "–",
+                  help=T("Precisão da fila: % dos casos analisados (excluindo inconclusivos) que eram fraude. "
+                         "É o principal indicador para calibrar a próxima versão do modelo.",
+                         "Queue precision: % of reviewed cases (excluding inconclusive) that were fraud. "
+                         "The main indicator to calibrate the next model version."), border=True)
 
     with st.container(horizontal=True):
-        status = st.segmented_control("Status", ["Pendentes", "Analisados", "Todos"], default="Pendentes")
-        acoes = st.pills("Ação do modelo", ["bloquear", "revisar"], default=["bloquear", "revisar"], selection_mode="multi")
-        estabs = st.multiselect("Estabelecimento", sorted(df.nome_estabelecimento.unique()), placeholder="Todos")
+        status = st.segmented_control("Status", ["pend", "feito", "todos"], default="pend",
+                                      format_func=lambda s: {"pend": T("Pendentes", "Pending"), "feito": T("Analisados", "Reviewed"),
+                                                             "todos": T("Todos", "All")}[s])
+        acoes = st.pills(T("Ação do modelo", "Model action"), ["bloquear", "revisar"], default=["bloquear", "revisar"],
+                         selection_mode="multi", format_func=acao_txt)
+        estabs = st.multiselect(T("Estabelecimento", "Merchant"), sorted(df.nome_estabelecimento.unique()),
+                                placeholder=T("Todos", "All"))
     vis = fila[fila.acao_recomendada.isin(acoes or [])]
-    if status == "Pendentes":
+    if status == "pend":
         vis = vis[vis.resultado == "Pendente"]
-    elif status == "Analisados":
+    elif status == "feito":
         vis = vis[vis.resultado != "Pendente"]
     if estabs:
         vis = vis[vis.nome_estabelecimento.isin(estabs)]
     vis = vis.reset_index(drop=True)
+    tabela = vis.assign(acao=vis.acao_recomendada.map(acao_txt), analise=vis.resultado.map(res_txt))
 
     c1, c2 = st.columns([1.55, 1])
     with c1:
         sel = st.dataframe(
-            vis[["prioridade", "perda_esperada", "prob_fraude", "valor_transacao", "acao_recomendada", "nome_estabelecimento",
-                 "datahora_transacao", "resultado"]],
+            tabela[["prioridade", "perda_esperada", "prob_fraude", "valor_transacao", "acao", "nome_estabelecimento",
+                    "datahora_transacao", "analise"]],
             hide_index=True, height=620, on_select="rerun", selection_mode="single-row", key="fila_sel",
             column_config={
                 "prioridade": st.column_config.NumberColumn("#", width="small"),
-                "perda_esperada": st.column_config.NumberColumn("Perda esperada", format="R$ %.2f",
-                                                                help="probabilidade de fraude × valor"),
-                "prob_fraude": st.column_config.ProgressColumn("Risco", min_value=0, max_value=1, format="percent", width="small"),
-                "valor_transacao": st.column_config.NumberColumn("Valor", format="R$ %.2f"),
-                "acao_recomendada": st.column_config.TextColumn("Ação", width="small"),
-                "nome_estabelecimento": "Estabelecimento",
-                "datahora_transacao": st.column_config.DatetimeColumn("Data/hora", format="DD/MM HH:mm"),
-                "resultado": "Análise",
+                "perda_esperada": st.column_config.NumberColumn(T("Perda esperada", "Expected loss"), format="R$ %.2f",
+                                                                help=T("probabilidade de fraude × valor", "fraud probability × amount")),
+                "prob_fraude": st.column_config.ProgressColumn(T("Risco", "Risk"), min_value=0, max_value=1, format="percent",
+                                                               width="small"),
+                "valor_transacao": st.column_config.NumberColumn(T("Valor", "Amount"), format="R$ %.2f"),
+                "acao": st.column_config.TextColumn(T("Ação", "Action"), width="small"),
+                "nome_estabelecimento": T("Estabelecimento", "Merchant"),
+                "datahora_transacao": st.column_config.DatetimeColumn(T("Data/hora", "Date/time"), format="DD/MM HH:mm"),
+                "analise": T("Análise", "Outcome"),
             })
     linhas = sel.selection.rows if sel and sel.selection else []
     with c2, st.container(border=True):
         if vis.empty:
-            st.caption("Nenhum caso com esses filtros.")
+            st.caption(T("Nenhum caso com esses filtros.", "No cases match these filters."))
             return
         caso = vis.iloc[linhas[0] if linhas else 0]
         if not linhas:
-            st.caption("Mostrando o 1º da lista. Clique em uma linha para trocar de caso.")
+            st.caption(T("Mostrando o 1º da lista. Clique em uma linha para trocar de caso.",
+                         "Showing the first case. Click a row to switch."))
         a = caso.acao_recomendada
-        st.html(f"""<div class='tc'><span>Prioridade #{caso.prioridade} · {caso.datahora_transacao:%d/%m %H:%M}</span></div>
+        st.html(f"""<div class='tc'><span>{T("Prioridade", "Priority")} #{caso.prioridade} · {caso.datahora_transacao:%d/%m %H:%M}</span></div>
           <div style="display:flex;gap:28px;align-items:flex-end;margin:6px 0 4px">
             <div><div class="big" style="font-size:44px">{brl2(caso.perda_esperada)}</div>
-              <span style="font-size:12.5px;color:{TINTA2}">perda esperada</span></div>
-            <div style="padding-bottom:18px"><span class="selo" style="background:{ACOES[a]}">{a}</span></div></div>""")
+              <span style="font-size:12.5px;color:{TINTA2}">{T("perda esperada", "expected loss")}</span></div>
+            <div style="padding-bottom:18px"><span class="selo" style="background:{ACOES[a]}">{acao_txt(a)}</span></div></div>""")
         st.html("<div class='mini'>" + "".join(
             f"<div><span>{r}</span><b>{v}</b></div>" for r, v in
-            [("Risco", pct_br(caso.prob_fraude)), ("Valor", brl2(caso.valor_transacao)), ("Hora", f"{int(caso.hora)}h")]) + "</div>")
-        st.markdown(f"**{caso.nome_estabelecimento}** · {caso.cidade} ({caso.cidade_regiao}) · {caso.device_type}"
-                    f"{' · :red-badge[dispositivo novo]' if caso.is_new_device else ' · dispositivo conhecido'}")
-        st.markdown(f"> {caso.motivo_alerta}")
-        titulo_card("Por que o risco está alto", "contribuição de cada característica · magenta aumenta, azul reduz")
+            [(T("Risco", "Risk"), pct_br(caso.prob_fraude)), (T("Valor", "Amount"), brl2(caso.valor_transacao)),
+             (T("Hora", "Hour"), f"{int(caso.hora)}h")]) + "</div>")
+        regiao = REG_EN.get(caso.cidade_regiao, caso.cidade_regiao) if EN() else caso.cidade_regiao
+        st.markdown(f"**{caso.nome_estabelecimento}** · {caso.cidade} ({regiao}) · {caso.device_type}"
+                    + (f" · :red-badge[{T('dispositivo novo', 'new device')}]" if caso.is_new_device
+                       else f" · {T('dispositivo conhecido', 'known device')}"))
+        st.markdown(f"> {caso.motivo_alerta_en if EN() else caso.motivo_alerta}")
+        titulo_card(T("Por que o risco está alto", "Why the risk is high"),
+                    T("contribuição de cada característica · magenta aumenta, azul reduz",
+                      "contribution of each feature · magenta increases, blue decreases"))
         cd = fatores_shap(caso)
-        cd["direcao"] = np.where(cd.contrib > 0, "aumenta", "reduz")
+        cd["direcao"] = np.where(cd.contrib > 0, "+", "-")
         grafico(alt.Chart(cd).mark_bar(cornerRadius=3, height=12).encode(
             y=alt.Y("variavel:N", sort=alt.EncodingSortField("contrib", op="sum", order="descending"), title=None,
                     axis=alt.Axis(domain=False)),
             x=alt.X("contrib:Q", title=None),
-            color=alt.Color("direcao:N", scale=alt.Scale(domain=["aumenta", "reduz"], range=[MAGENTA, AZUL]), legend=None),
-            tooltip=["variavel", alt.Tooltip("contrib:Q", format="+.3f", title="contribuição")]), 200)
+            color=alt.Color("direcao:N", scale=alt.Scale(domain=["+", "-"], range=[MAGENTA, AZUL]), legend=None),
+            tooltip=["variavel", alt.Tooltip("contrib:Q", format="+.3f", title=T("contribuição", "contribution"))]), 200)
 
         anterior = trat[trat.id == caso.id]
         with st.form(f"trat_{caso.id}", clear_on_submit=False, border=False):
-            titulo_card("Registrar análise", "a conclusão vira rótulo para calibrar a próxima versão do modelo")
+            titulo_card(T("Registrar análise", "Record outcome"),
+                        T("a conclusão vira rótulo para calibrar a próxima versão do modelo",
+                          "the outcome becomes a label to calibrate the next model version"))
             idx = RESULTADOS.index(anterior.resultado.iloc[0]) if len(anterior) else None
-            resultado = st.radio("Conclusão", RESULTADOS, index=idx, horizontal=True)
-            analista = st.text_input("Analista", value=anterior.analista.iloc[0] if len(anterior) else "")
-            obs = st.text_area("Observação", value=anterior.observacao.iloc[0] if len(anterior) and pd.notna(
-                anterior.observacao.iloc[0]) else "", placeholder="Ex.: cliente confirmou a compra por telefone", height=80)
-            if st.form_submit_button("Salvar análise", type="primary", icon=":material/check:"):
+            resultado = st.radio(T("Conclusão", "Outcome"), RESULTADOS, index=idx, horizontal=True, format_func=res_txt)
+            analista = st.text_input(T("Analista", "Analyst"), value=anterior.analista.iloc[0] if len(anterior) else "")
+            obs = st.text_area(T("Observação", "Notes"), value=anterior.observacao.iloc[0] if len(anterior) and pd.notna(
+                anterior.observacao.iloc[0]) else "", placeholder=T("Ex.: cliente confirmou a compra por telefone",
+                                                                   "E.g. customer confirmed the purchase by phone"), height=80)
+            if st.form_submit_button(T("Salvar análise", "Save outcome"), type="primary", icon=":material/check:"):
                 if resultado is None:
-                    st.warning("Escolha uma conclusão antes de salvar.")
+                    st.warning(T("Escolha uma conclusão antes de salvar.", "Choose an outcome before saving."))
                 else:
                     salvar_tratativa({"id": int(caso.id), "resultado": resultado, "analista": analista.strip(),
                                       "observacao": obs.strip(), "registrado_em": pd.Timestamp.now().isoformat(timespec="seconds")})
-                    st.toast("Análise registrada", icon=":material/check_circle:")
+                    st.toast(T("Análise registrada", "Outcome saved"), icon=":material/check_circle:")
                     st.rerun()
 
     if len(trat):
         exp = trat.merge(df.reset_index(names="id"), on="id", how="left")
-        st.download_button("Baixar análises registradas (CSV)", exp.to_csv(index=False).encode("utf-8-sig"),
-                           "tratativas_fraude.csv", "text/csv", icon=":material/download:")
+        st.download_button(T("Baixar análises registradas (CSV)", "Download recorded outcomes (CSV)"),
+                           exp.to_csv(index=False).encode("utf-8-sig"), "tratativas_fraude.csv", "text/csv",
+                           icon=":material/download:")
 
 
 # ---------------------------------------------------------------------------
 def pagina_simulador():
-    cabecalho("Explicabilidade", "Simulador de transação",
-              "Monte uma transação e veja o risco calculado pelo modelo e o peso de cada variável (SHAP).")
+    cabecalho(T("Explicabilidade", "Explainability"), T("Simulador de transação", "Transaction simulator"),
+              T("Monte uma transação e veja o risco calculado pelo modelo e o peso de cada variável (SHAP).",
+                "Build a transaction and see the model's risk and the weight of each feature (SHAP)."))
     feats, cats, med = meta["features"], meta["categorias"], meta["medianas"]
     linha = {}
     with st.container(border=True):
         cols = st.columns(3)
-        valor = cols[0].number_input("Valor (R$)", 0.5, 1000.0, 35.0, step=1.0)
-        hora = cols[1].slider("Hora", 0, 23, 22, format="%dh")
-        novo = cols[2].toggle("Dispositivo novo", True)
+        valor = cols[0].number_input(T("Valor (R$)", "Amount (R$)"), 0.5, 1000.0, 35.0, step=1.0)
+        hora = cols[1].slider(T("Hora", "Hour"), 0, 23, 22, format="%dh")
+        novo = cols[2].toggle(T("Dispositivo novo", "New device"), True)
         outros = [f for f in feats if f not in DERIVADAS]
         padrao = {"nome_estabelecimento": "Gas Station", "cidade": "São Paulo", "device_type": "mobile"}
         cols = st.columns(3)
@@ -365,7 +434,7 @@ def pagina_simulador():
             if f in cats:
                 opcoes = cats[f]
                 idx = opcoes.index(padrao[f]) if padrao.get(f) in opcoes else 0
-                linha[f] = c.selectbox(NOMES.get(f, f), opcoes, index=idx)
+                linha[f] = c.selectbox(nomes().get(f, f), opcoes, index=idx)
             else:
                 linha[f] = c.number_input(f, value=float(med.get(f, 0)))
     # variáveis derivadas, calculadas como nos dados reais (evita combinações impossíveis)
@@ -383,61 +452,95 @@ def pagina_simulador():
     a = acao(p)
     c1, c2 = st.columns([1, 1.7])
     with c1, st.container(border=True):
-        titulo_card("Probabilidade de fraude")
+        titulo_card(T("Probabilidade de fraude", "Fraud probability"))
         st.html(f"""<div class="big">{pct_br(p)}</div>
-          <span class="selo" style="background:{ACOES[a] if a != 'aprovar' else '#6b7090'}">{a}</span>
+          <span class="selo" style="background:{ACOES[a] if a != 'aprovar' else '#6b7090'}">{acao_txt(a)}</span>
           <div class="gauge"><i style="width:{T_REV*100}%;background:#dfe1ea"></i>
             <i style="width:{(T_BLOQ-T_REV)*100}%;background:{AZUL}"></i><i style="flex:1;background:{MAGENTA}"></i>
             <div class="m" data-v="{pct_br(p, 0)}" style="left:calc({min(max(p, 0.005), 0.995)*100}% - 1px)"></div></div>
-          <div class="escala"><span style="width:{T_REV*100}%">aprovar</span>
-            <span style="width:{(T_BLOQ-T_REV)*100}%">revisar · ≥ {T_REV:.0%}</span><span>bloquear · ≥ {T_BLOQ:.0%}</span></div>""")
+          <div class="escala"><span style="width:{T_REV*100}%">{acao_txt("aprovar")}</span>
+            <span style="width:{(T_BLOQ-T_REV)*100}%">{acao_txt("revisar")} · ≥ {T_REV:.0%}</span>
+            <span>{acao_txt("bloquear")} · ≥ {T_BLOQ:.0%}</span></div>""")
     with c2, st.container(border=True):
-        titulo_card("O que pesou na decisão", "contribuição SHAP de cada variável (log-odds) · magenta aumenta o risco, azul reduz")
-        cd = pd.DataFrame({"variavel": [NOMES.get(f, f) for f in feats], "contrib": contrib})
-        cd["direcao"] = np.where(cd.contrib > 0, "aumenta o risco", "reduz o risco")
+        titulo_card(T("O que pesou na decisão", "What drove the decision"),
+                    T("contribuição SHAP de cada variável (log-odds) · magenta aumenta o risco, azul reduz",
+                      "SHAP contribution of each feature (log-odds) · magenta increases the risk, blue decreases"))
+        cd = pd.DataFrame({"variavel": [nomes().get(f, f) for f in feats], "contrib": contrib})
+        cd["direcao"] = np.where(cd.contrib > 0, "+", "-")
         base = alt.Chart(cd).encode(y=alt.Y("variavel:N", sort=alt.EncodingSortField("contrib", op="sum", order="descending"),
                                             title=None, axis=alt.Axis(domain=False)))
         grafico(base.mark_bar(cornerRadius=3, height=16).encode(
             x=alt.X("contrib:Q", title=None),
-            color=alt.Color("direcao:N", scale=alt.Scale(domain=["aumenta o risco", "reduz o risco"], range=[MAGENTA, AZUL]),
-                            legend=None),
-            tooltip=["variavel", alt.Tooltip("contrib:Q", format="+.3f", title="contribuição")])
+            color=alt.Color("direcao:N", scale=alt.Scale(domain=["+", "-"], range=[MAGENTA, AZUL]), legend=None),
+            tooltip=["variavel", alt.Tooltip("contrib:Q", format="+.3f", title=T("contribuição", "contribution"))])
             + alt.Chart(pd.DataFrame({"x": [0]})).mark_rule(color=TINTA2).encode(x="x:Q"), 270)
 
 
 # ---------------------------------------------------------------------------
 def pagina_drift():
-    cabecalho("Governança", "Monitoramento de drift",
-              "PSI entre 2025 (treino) e janeiro/2026. Abaixo de 0,10 é estável; de 0,10 a 0,25 pede atenção; acima de 0,25 indica mudança relevante.")
+    cabecalho(T("Governança", "Governance"), T("Monitoramento de drift", "Drift monitoring"),
+              T("PSI entre 2025 (treino) e janeiro/2026. Abaixo de 0,10 é estável; de 0,10 a 0,25 pede atenção; "
+                "acima de 0,25 indica mudança relevante.",
+                "PSI between 2025 (training) and January/2026. Below 0.10 is stable; 0.10 to 0.25 needs attention; "
+                "above 0.25 means a relevant shift."))
     d = drift.copy()
     d["faixa"] = pd.cut(d.psi, [-1, 0.10, 0.25, 99], labels=["estável", "atenção", "mudança"]).astype(str)
-    lim = max(0.3, d.psi.max() * 1.15)
+    d["faixa_txt"] = d.faixa.map(lambda f: FAIXA_EN.get(f, f) if EN() else f)
+    d["status_txt"] = d.status.map(lambda s: s.replace(s.split(" ", 1)[-1], FAIXA_EN.get(s.split(" ", 1)[-1], "")) if EN() else s)
+    d["psi_plot"] = d.psi.clip(lower=1e-5)  # escala log não aceita zero
+    d["folga"] = 0.10 / d.psi_plot  # quantas vezes abaixo do limite de atenção
+    d["inicio"] = 1e-5
+    n_est = int((d.faixa == "estável").sum())
+    with st.container(horizontal=True):
+        st.metric(T("Variáveis estáveis", "Stable features"), f"{n_est} {T('de', 'of')} {len(d)}", border=True)
+        st.metric(T("Maior PSI", "Highest PSI"), n_br(d.psi.max(), 4),
+                  help=T("variável: ", "feature: ") + d.loc[d.psi.idxmax(), "variavel"], border=True)
+        st.metric(T("Folga até o limite de atenção", "Headroom to the attention limit"), f"{n_br(d.folga.min())}x",
+                  help=T("o maior PSI ainda está essa quantidade de vezes abaixo de 0,10",
+                         "the highest PSI is still this many times below 0.10"), border=True)
     with st.container(border=True):
-        titulo_card("PSI por variável", "as faixas ao fundo marcam os limites de atenção (0,10) e de mudança (0,25)")
-        faixas = pd.DataFrame({"ini": [0, 0.10, 0.25], "fim": [0.10, 0.25, lim], "faixa": ["estável", "atenção", "mudança"]})
-        fundo = alt.Chart(faixas).mark_rect(opacity=0.5).encode(
-            x="ini:Q", x2="fim:Q", color=alt.Color("faixa:N", scale=alt.Scale(domain=["estável", "atenção", "mudança"],
-                                                                                range=["#f4f5fa", "#ece6f8", "#fbe0ea"]), legend=None))
-        base = alt.Chart(d).encode(y=alt.Y("variavel:N", sort="-x", title=None, axis=alt.Axis(domain=False)))
-        barras = base.mark_bar(cornerRadiusTopRight=3, cornerRadiusBottomRight=3, height=14).encode(
-            x=alt.X("psi:Q", title="PSI", scale=alt.Scale(domain=[0, lim])),
+        titulo_card(T("PSI por variável · escala logarítmica", "PSI by feature · log scale"),
+                    T("os valores são tão pequenos que só aparecem em escala log · linhas = limites de atenção (0,10) e de mudança (0,25)",
+                      "values are so small they only show on a log scale · lines = attention (0.10) and shift (0.25) limits"))
+        x_log = alt.Scale(type="log", domain=[1e-5, 1])
+        faixas = pd.DataFrame({"ini": [0.10, 0.25], "fim": [0.25, 1], "cor": ["#efe7fa", "#fde3ee"]})
+        fundo = alt.Chart(faixas).mark_rect(opacity=0.8).encode(
+            x=alt.X("ini:Q", scale=x_log), x2="fim:Q", color=alt.Color("cor:N", scale=None))
+        limites = pd.DataFrame({"x": [0.10, 0.25], "rot": [T("atenção 0,10", "attention 0.10"), T("mudança 0,25", "shift 0.25")]})
+        linhas = alt.Chart(limites).mark_rule(color=TINTA2, strokeDash=[4, 4]).encode(x=alt.X("x:Q", scale=x_log))
+        rot_lim = alt.Chart(limites).mark_text(align="left", dx=4, dy=-6, color=TINTA2, fontSize=11).encode(
+            x=alt.X("x:Q", scale=x_log), y=alt.value(0), text="rot:N")
+        base = alt.Chart(d).encode(y=alt.Y("variavel:N", sort=alt.EncodingSortField("psi", order="descending"), title=None,
+                                           axis=alt.Axis(domain=False, grid=True)))
+        hastes = base.mark_rule(color="#c9cdf3", strokeWidth=2).encode(x=alt.X("inicio:Q", scale=x_log), x2="psi_plot:Q")
+        pontos = base.mark_circle(size=140, opacity=1, stroke="white", strokeWidth=2).encode(
+            x=alt.X("psi_plot:Q", title=T("PSI (escala log)", "PSI (log scale)"), scale=x_log, axis=alt.Axis(format="~g")),
             color=alt.Color("faixa:N", scale=alt.Scale(domain=["estável", "atenção", "mudança"], range=[AZUL, VIOLETA, MAGENTA]),
-                            legend=alt.Legend(title=None)),
-            tooltip=["variavel", alt.Tooltip("psi:Q", format=".3f"), "faixa"])
-        rotulos = base.mark_text(align="left", dx=5, color=TINTA2, fontSize=11).encode(x="psi:Q", text=alt.Text("psi:Q", format=".3f"))
-        grafico(fundo + barras + rotulos, 340)
-    st.dataframe(d[["variavel", "psi", "status"]], hide_index=True,
-                 column_config={"variavel": "Variável", "psi": st.column_config.NumberColumn("PSI", format="%.3f"),
-                                "status": "Status"})
-    st.info("Janeiro/2026 está estável em relação a 2025 em todas as variáveis do modelo. Mas PSI estável não "
-            "garante que o padrão de fraude não mudou: em dez/25 surgiu fraude às 20h–21h sem mudar a distribuição das "
-            "variáveis. Por isso a regra combina PSI com a **precisão da fila manual**: re-treinar todo mês, ou antes "
-            "se o PSI do score passar de 0,25 ou a precisão da fila cair mais de 20%.", icon=":material/info:")
+                            legend=None),
+            tooltip=["variavel", alt.Tooltip("psi:Q", format=".5f", title="PSI"), alt.Tooltip("faixa_txt:N", title="status")])
+        rotulos = base.mark_text(align="left", dx=10, color=TINTA2, fontSize=11).encode(
+            x="psi_plot:Q", text=alt.Text("psi:Q", format=".5f"))
+        grafico(fundo + linhas + rot_lim + hastes + pontos + rotulos, 360)
+    st.dataframe(d[["variavel", "psi", "status_txt"]], hide_index=True,
+                 column_config={"variavel": T("Variável", "Feature"), "psi": st.column_config.NumberColumn("PSI", format="%.5f"),
+                                "status_txt": "Status"})
+    st.info(T("Janeiro/2026 está estável em relação a 2025 em todas as variáveis do modelo. Mas PSI estável não "
+              "garante que o padrão de fraude não mudou: em dez/25 surgiu fraude às 20h–21h sem mudar a distribuição das "
+              "variáveis. Por isso a regra combina PSI com a **precisão da fila manual**: re-treinar todo mês, ou antes "
+              "se o PSI do score passar de 0,25 ou a precisão da fila cair mais de 20%.",
+              "January/2026 is stable versus 2025 on every model feature. But a stable PSI does not guarantee the fraud "
+              "pattern has not changed: in Dec/25 fraud appeared at 8–9 pm without shifting the feature distributions. "
+              "That is why the rule combines PSI with **manual queue precision**: retrain every month, or sooner if the "
+              "score's PSI goes above 0.25 or queue precision drops more than 20%."), icon=":material/info:")
 
 
-st.navigation([
-    st.Page(pagina_visao, title="Visão jan/2026", icon=":material/dashboard:", url_path="visao", default=True),
-    st.Page(pagina_fila, title="Fila priorizada", icon=":material/assignment:", url_path="fila"),
-    st.Page(pagina_simulador, title="Simulador", icon=":material/science:", url_path="simulador"),
+pagina = st.navigation([
+    st.Page(pagina_visao, title=T("Visão jan/2026", "Jan/2026 overview"), icon=":material/dashboard:", url_path="visao", default=True),
+    st.Page(pagina_fila, title=T("Fila priorizada", "Prioritized queue"), icon=":material/assignment:", url_path="fila"),
+    st.Page(pagina_simulador, title=T("Simulador", "Simulator"), icon=":material/science:", url_path="simulador"),
     st.Page(pagina_drift, title="Drift", icon=":material/monitoring:", url_path="drift"),
-], position="top").run()
+], position="top")
+with st.container(horizontal=True, horizontal_alignment="right"):
+    st.segmented_control("Idioma / Language", ["PT", "EN"], key="lang", label_visibility="collapsed",
+                         format_func=lambda x: {"PT": "Português", "EN": "English"}[x])
+pagina.run()
