@@ -1,0 +1,15 @@
+# PDFs (enunciado do case e apresentação) não são publicados
+*.pdf
+# apresentação: gerador e versão HTML ficam só locais
+extras/gerar_apresentacao.py
+artefatos/apresentacao.html
+# roteiro pessoal do vídeo
+video.md
+# modelos pesados do AutoGluon (recriados com USAR_AUTOGLUON = True)
+artefatos/ag_*/
+nb_exec.log
+entrega_case_fraude.zip
+__pycache__/
+.ipynb_checkpoints/
+.venv/
+app/dados/tratativas.csv

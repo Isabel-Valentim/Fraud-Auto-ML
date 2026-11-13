@@ -1,0 +1,198 @@
+{
+  "n_hist": 523525,
+  "n_jan": 44451,
+  "taxa_fraude_2025": 0.039128981424000765,
+  "perda_fraude_2025": 632205.75,
+  "auc_score_interno": 0.4989225001859332,
+  "features_finais": [
+    "hora",
+    "is_new_device",
+    "nome_estabelecimento",
+    "cidade",
+    "turno",
+    "cidade_regiao",
+    "valor_transacao",
+    "device_type",
+    "valor_log"
+  ],
+  "features_descartadas": [
+    "tipo_estabelecimento",
+    "valor_categoria",
+    "dia_semana",
+    "dia_mes",
+    "fim_de_semana",
+    "is_feriado",
+    "dias_ate_feriado",
+    "cli_n_prev",
+    "cli_horas_desde_ult",
+    "cli_valor_vs_media",
+    "cli_primeiro_estab",
+    "cli_primeira_cidade",
+    "score_interno",
+    "temperatura_celsius"
+  ],
+  "campeao": "lightgbm",
+  "gap_ag_lgbm": -0.006108205300620728,
+  "tabela_modelos": [
+    {
+      "modelo": "score_interno (atual)",
+      "PR-AUC": 0.05250981312089857,
+      "ROC-AUC": 0.4942894938004176
+    },
+    {
+      "modelo": "regra de especialista",
+      "PR-AUC": 0.25451846018368196,
+      "ROC-AUC": 0.7876000952658703
+    },
+    {
+      "modelo": "regressão logística",
+      "PR-AUC": 0.3445497610023978,
+      "ROC-AUC": 0.8239748806315488
+    },
+    {
+      "modelo": "AutoGluon rodada 1 (todas features)",
+      "PR-AUC": 0.6467030058670087,
+      "ROC-AUC": 0.9651714647541932
+    },
+    {
+      "modelo": "AutoGluon melhor (WeightedEnsemble_L2)",
+      "PR-AUC": 0.6468678850122802,
+      "ROC-AUC": 0.965594651022648
+    },
+    {
+      "modelo": "LightGBM extra_trees (campeão)",
+      "PR-AUC": 0.6529760903129009,
+      "ROC-AUC": 0.9705763772607392
+    }
+  ],
+  "n_modelos_autogluon": 20,
+  "pr_auc_teste": 0.6529760903129009,
+  "roc_auc_teste": 0.9705763772607392,
+  "pr_auc_valid": 0.6548934362298955,
+  "recall_top10": 0.8291165491497304,
+  "t_rev": 0.1,
+  "t_bloq": 0.7,
+  "cenarios_dez": [
+    {
+      "cenario": "Sem modelo (aprova tudo)",
+      "custo_total": 73434.4,
+      "perda_fraude": 73434.4,
+      "valor_fraude_evitado": 0.0,
+      "% fraudes capturadas": 0.0,
+      "% valor fraude evitado": 0.0,
+      "n_revisar": 0.0,
+      "n_bloquear": 0.0,
+      "legitimos_bloqueados": 0.0,
+      "% transações em análise": 0.0,
+      "horas de análise": 0.0
+    },
+    {
+      "cenario": "score_interno atual",
+      "custo_total": 83421.5,
+      "perda_fraude": 66789.5,
+      "valor_fraude_evitado": 6644.9,
+      "% fraudes capturadas": 0.08710078805474906,
+      "% valor fraude evitado": 0.09048756441122961,
+      "n_revisar": 4158.0,
+      "n_bloquear": 0.0,
+      "legitimos_bloqueados": 0.0,
+      "% transações em análise": 0.0935412026726058,
+      "horas de análise": 346.5
+    },
+    {
+      "cenario": "Regra de especialista",
+      "custo_total": 45853.83,
+      "perda_fraude": 31033.83,
+      "valor_fraude_evitado": 42400.57,
+      "% fraudes capturadas": 0.5686437163002903,
+      "% valor fraude evitado": 0.5773938372207031,
+      "n_revisar": 3705.0,
+      "n_bloquear": 0.0,
+      "legitimos_bloqueados": 0.0,
+      "% transações em análise": 0.08335020584463791,
+      "horas de análise": 308.75
+    },
+    {
+      "cenario": "Modelo (aprovar/revisar/bloquear)",
+      "custo_total": 31083.84,
+      "perda_fraude": 15213.84,
+      "valor_fraude_evitado": 58220.56,
+      "% fraudes capturadas": 0.7971795935296557,
+      "% valor fraude evitado": 0.7928240715522971,
+      "n_revisar": 3525.0,
+      "n_bloquear": 653.0,
+      "legitimos_bloqueados": 118.0,
+      "% transações em análise": 0.0793008031315381,
+      "horas de análise": 293.75
+    }
+  ],
+  "economia_dez": 42350.56,
+  "jan2026": {
+    "n": 44451,
+    "n_alerta": 4322,
+    "n_revisar": 3753,
+    "n_bloquear": 569,
+    "fraude_esperada_qtd": 1746.0734,
+    "fraude_esperada_valor": 53928.079796,
+    "valor_em_alerta": 133795.91,
+    "horas_analise": 312.75
+  },
+  "fila": {
+    "n_topo": 432,
+    "perda_topo_valor": 0.27949656877602513,
+    "perda_topo_prob": 0.21323152048514962,
+    "risco_medio_topo": 0.44907407407407407
+  },
+  "drift": [
+    {
+      "variavel": "nome_estabelecimento",
+      "psi": 0.00031581836820608237,
+      "status": "🟢 estável"
+    },
+    {
+      "variavel": "score_modelo",
+      "psi": 0.00021501857268949235,
+      "status": "🟢 estável"
+    },
+    {
+      "variavel": "valor_transacao",
+      "psi": 0.00019218303714593852,
+      "status": "🟢 estável"
+    },
+    {
+      "variavel": "valor_log",
+      "psi": 0.00019218303714593852,
+      "status": "🟢 estável"
+    },
+    {
+      "variavel": "cidade",
+      "psi": 6.897176143099844e-05,
+      "status": "🟢 estável"
+    },
+    {
+      "variavel": "cidade_regiao",
+      "psi": 5.435045361540628e-05,
+      "status": "🟢 estável"
+    },
+    {
+      "variavel": "device_type",
+      "psi": 3.42781518755562e-05,
+      "status": "🟢 estável"
+    },
+    {
+      "variavel": "hora",
+      "psi": 6.890856459063598e-07,
+      "status": "🟢 estável"
+    },
+    {
+      "variavel": "turno",
+      "psi": 1.6872871315890176e-07,
+      "status": "🟢 estável"
+    },
+    {
+      "variavel": "is_new_device",
+      "psi": 0.0,
+      "status": "🟢 estável"
+    }
+  ]
+}

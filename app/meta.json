@@ -1,0 +1,67 @@
+{
+  "features": [
+    "hora",
+    "is_new_device",
+    "nome_estabelecimento",
+    "cidade",
+    "turno",
+    "cidade_regiao",
+    "valor_transacao",
+    "device_type",
+    "valor_log"
+  ],
+  "categorias": {
+    "nome_estabelecimento": [
+      "Clothing Store",
+      "Electronics Store",
+      "Gas Station",
+      "Online Shop 1",
+      "Online Shop 2",
+      "Pharmacy Z",
+      "Restaurant X",
+      "Restaurant Y",
+      "Supermarket A",
+      "Supermarket B"
+    ],
+    "cidade": [
+      "Belo Horizonte",
+      "Curitiba",
+      "Porto Alegre",
+      "Recife",
+      "Rio de Janeiro",
+      "Salvador",
+      "São Paulo"
+    ],
+    "cidade_regiao": [
+      "Nordeste",
+      "Sudeste",
+      "Sul"
+    ],
+    "device_type": [
+      "desktop",
+      "mobile",
+      "tablet"
+    ],
+    "turno": [
+      "madrugada",
+      "manha",
+      "noite",
+      "tarde"
+    ]
+  },
+  "medianas": {
+    "hora": 11.0,
+    "is_new_device": 0.0,
+    "valor_transacao": 25.25,
+    "valor_log": 3.2676659890376327
+  },
+  "t_rev": 0.1,
+  "t_bloq": 0.7,
+  "custo_revisao": 4.0,
+  "custo_bloqueio": 15.0,
+  "metricas_teste": {
+    "pr_auc": 0.6529760903129009,
+    "roc_auc": 0.9705763772607392,
+    "auc_score_interno": 0.4989225001859332
+  }
+}
